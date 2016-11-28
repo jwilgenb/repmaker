@@ -1,0 +1,136 @@
+#!/usr/bin/perl -w
+##########################################################################
+# BsLauncher Version .9  -- a utility for distributing a PAUP* bootstrap 
+#            analysis over multiple machines. 
+# Copyright (C) 2003 James Wilgenbusch
+# 
+# This program is free software; you can redistribute it and/or
+# modify it under the terms of the GNU General Public License
+# as published by the Free Software Foundation; either version 2
+# of the License, or (at your option) any later version.
+#
+# This program is distributed in the hope that it will be useful,
+# but WITHOUT ANY WARRANTY; without even the implied warranty of
+# MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+# GNU General Public License for more details. 
+# http://www.gnu.org/copyleft/gpl.html 
+##########################################################################
+
+use Getopt::Std;
+use Cwd;
+
+my %opts;
+getopts('hf:', \%opts);
+
+if (!%opts)  { #if no options are given
+    print "You need to specify a hosts file using the \"-f\" flag\n";
+    print "Use the help flag for more info (e.g., bsLauncher.pl -h) \n";
+    exit 0;
+}
+
+if ($opts{'h'}) { #if help option is given
+	help();
+	exit 0;
+}
+
+while (($key, $value) = each (%opts)) { 
+	if ($key eq 'f' && !$value) { #check if a filename is given
+			print "You must include a filename with the \"-f\" flag.\n";
+			exit 0;
+	}
+	elsif ($key eq 'f') {
+		$hostsFile = $opts{'f'};
+	}		 
+}
+
+$pwd = cwd();
+chdir;
+$hpwd = cwd(); #for cases when home dir pwd is different then env(home)
+chdir $pwd;
+$spwd = cwd(); #used of sh script in case mount points have different names
+$spwd =~ s/$hpwd/\$HOME/;
+
+opendir RMD, $pwd or die "Cannot open directory: $!";
+	@reps = grep /^rep\./, readdir RMD;
+closedir RMD;
+
+$numreps = @reps;
+
+# reference a list of active nodes
+open (NODE, "$hostsFile") || die "Can't open $hostsFile:  $!\n";
+FILE:
+while (<NODE>) { # loop over nodeStatus file lines
+        chop;
+        if (/^\s*\#/)  {             # skip over lines with the pound symbol
+        }
+        else {
+                push(@j, split /s+/, $_);
+                push @nodes, $j[0];
+                }
+@j = (); 
+}
+close (NODE);
+
+for $i (0 .. $#reps) {
+	open(OUTF,">run.$i");
+		print OUTF "\#!/bin/sh \n";
+		print OUTF "cd $spwd \n";
+		print OUTF "paup -n -f rep.$i > logfile.$i & \n";
+	close(OUTF);
+	`chmod 755 run.$i`;
+}
+
+$i = 0;
+while ($i < $numreps) {
+    foreach $node (@nodes) {
+		if ($i >= $numreps) {
+			exit 0;
+		}
+		else {
+		    #print "ssh $node $spwd/run.$i 1> log.$i &  \n";
+		    system ("ssh $node $spwd/run.$i 1> log.$i &  ");
+			$i++;
+		}
+	}
+}
+
+
+##################################################################	
+# prints help info
+#
+sub help {
+
+print <<HELP;
+
+bslauncher -- Program Help
+=======================
+
+Description:  Program used in conjunction with PAUP* and repmaker (perl script) 
+              for distributing a single PAUP* bootstrap analysis over multiple 
+              machines. The program repmaker creates the NEXUS files (typically 
+              bootstrap replicates) and PAUP* does the actual work. BsLauncher
+              is probably only useful on clusters where the scheduler Condor is
+              not available.  
+              
+              *****************************************************************
+              * NOTE: bslauncher assumes that passwordless authentication is  *
+              * configured on all the nodes given in the hosts file and that  *
+              * all the host nodes mount the user's home directory.           *
+              *****************************************************************
+              
+Usage: bslauncher [-h] <-f filename>
+	   
+Options:              
+
+       -h   Displays this information
+ 
+       -f   Name and path to host file.  Format of host file should be as:
+              #hostname
+              node21 
+              node22 
+              node23 
+              node24 
+              node25 
+                
+HELP
+}

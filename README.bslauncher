@@ -1,0 +1,62 @@
+##########################################################################
+# BsLauncher Version .9  -- a utility for distributing a PAUP* bootstrap 
+#          analysis over multiple machines. 
+# Copyright (C) 2003 James Wilgenbusch
+# 
+# This program is free software; you can redistribute it and/or
+# modify it under the terms of the GNU General Public License
+# as published by the Free Software Foundation; either version 2
+# of the License, or (at your option) any later version.
+#
+# This program is distributed in the hope that it will be useful,
+# but WITHOUT ANY WARRANTY; without even the implied warranty of
+# MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+# GNU General Public License for more details. 
+# http://www.gnu.org/copyleft/gpl.html 
+##########################################################################
+
+Description:
+============
+BsLauncher is a program used in conjunction with PAUP* and repmaker 
+(perl script) for distributing a single PAUP* bootstrap analysis over 
+multiple machines. The program repmaker creates the NEXUS files (typically 
+bootstrap replicates) and PAUP* does the actual work. BsLauncher is 
+probably only useful on clusters where the scheduler Condor is not
+available.  
+
+Requirements:
+=============              
+1. rep.* files in the current working directory that have been generated 
+by the program RepMaker.
+
+2. BsLauncher assumes that passwordless authentication is  
+configured on all the nodes given in the host file.  (See a good web 
+site for instructions on how to configure your version of ssh to 
+authenticate without a password.) 
+
+3. You must modify the contents of the host file (e.g. hosts.in) to 
+include the names of the machines in your cluster.
+
+4. All of the nodes named in the host file must have access (e.g. nfs 
+or afp) to your home directory.
+
+5. Possible others that I have not considered.    
+
+Usage: 
+======
+bslauncher [-h] <-f filename>              
+
+       -h   Displays help
+ 
+       -f   Name and path to host file.  
+
+Format of host file should be as follows:
+
+#hostname
+node21 
+node22 
+node23 
+node24 
+node25 
+                     
+Lines starting with "#" will not be read.

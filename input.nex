@@ -1,0 +1,4 @@
+begin paup;
+  set crit=likelihood;
+  lset nst=2 tratio=4.71 rates=gamma shape=0.4036;
+end;

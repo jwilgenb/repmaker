@@ -1,0 +1,508 @@
+#!/usr/bin/perl -w
+##########################################################################
+# RepMaker Version 1.1  -- a utility for creating multiple NEXUS files.
+#          Files can be used to distribute a single PAUP* bootstrap 
+#          analysis over multiple machines using:
+#          -- Condor (http://www.cs.wisc.edu/condor) or 
+#          -- BsLauncher (http://www.paup.csit.fsu.edu/nlinks.html) 
+# Copyright (C) 2007 James Wilgenbusch
+# 
+# This program is free software; you can redistribute it and/or
+# modify it under the terms of the GNU General Public License
+# as published by the Free Software Foundation; either version 2
+# of the License, or (at your option) any later version.
+#
+# This program is distributed in the hope that it will be useful,
+# but WITHOUT ANY WARRANTY; without even the implied warranty of
+# MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+# GNU General Public License for more details. 
+# http://www.gnu.org/copyleft/gpl.html 
+##########################################################################
+ 
+use Cwd;
+use File::Spec;
+
+#---------------------------------------------------------------------------
+#  Globals that can be changed 
+#---------------------------------------------------------------------------
+my $paupbin = '/usr/common/i686-linux/bin/paup.$$(OpSys).$$(Arch)'; #find_paup();
+#my $paupbin = find_paup();
+my $paupbin_condor = find_paupcondor();
+
+#---------------------------------------------------------------------------
+#  Initialize Globals 
+#---------------------------------------------------------------------------
+my $volume;
+my $directory;
+my $file;
+my $abs_path;
+my $nreps;
+my $treps = 100;
+my $nodes = 100;
+my $hsCMDs;
+my $fixSeed;
+my $savelog;
+my $seed;
+my $bootOpts;
+my $dataFile;
+my $userinput = $ARGV[0];  
+my $condorU = "vanilla";
+
+if (!$paupbin && !$paupbin_condor) {
+	die qq(\a\nCouldn\'t find executable "paup" (check your path).\n\n);
+}
+my $dir = cwd();
+chdir;
+my $hdir = cwd(); #needed because of automounter gives different location than passwd
+chdir $dir;  
+
+$paupCmds = openInput();
+
+#---------------------------------------------------------------------------
+# Set the data file
+if (!$userinput){
+	$dataFile = getDataFile();
+}
+elsif ( $userinput eq "-h" ) {
+	comments(); 
+	exit(0);
+}
+elsif (-e $userinput){
+	$abs_path = File::Spec->rel2abs($userinput);
+	($volume, $directory, $file) = File::Spec->splitpath($userinput);
+	$dataFile = "$abs_path";
+}
+else {
+	print "\nWARNING: The file $userinput doesn't exist! \n\n";
+	$dataFile = getDataFile();
+}
+
+
+#---------------------------------------------------------------------------
+#  Start asking questions 
+#---------------------------------------------------------------------------
+print "How many bootstrap replicates do you want to run? \n";
+$treps = <STDIN>;
+chop ($treps);
+
+while ($treps !~ /^\d+$/ || $treps < 1) {
+	print "WARNING!: The number of bootstrap replicates must be a positive integar.\n";
+	print "Try Again\n";
+	print "How many bootstrap replicates do you want to run? \n";
+	$treps = <STDIN>;
+	chop ($treps);
+} 
+
+print "How many pieces should the bootstrap replicates be divided into? \n";
+  $nodes = <STDIN>;
+  chop ($nodes);
+
+$nreps = $treps/$nodes;
+
+while ( $nreps !~ /^\d+$/ || $nreps < 1){
+	print "WARNING!: The number of pieces you chose does not divide evenly\n";
+	print "          into the number of bootstrap replicates.\n\n";
+	print "Try Again\n\n";
+	print "How many pieces should the bootstrap replicates be divided into? \n";
+	$nodes = <STDIN>;
+	chop ($nodes);
+	$nreps = $treps/$nodes;
+} 
+
+print "Do you want to specify a fixed bootstrap seed for each piece? <y|N>\n\n";
+print "If you type \"Yes\" the number used for the bseed option in the PAUP \n";
+print "block will correspond to the piece. \n";
+  $fixSeed = <STDIN>;
+  chop ($fixSeed);
+if ($fixSeed =~/y/i) {
+	$seed = 1;
+}
+else {
+	$seed = 0;
+}
+
+print "Add specific hsearch options for each bootstrap replicate. \n";
+print "Do not include a \"/\" or a \";\". \n";
+print "For example type: addseq=random nreps=5 RearrLimit=500 \n";
+print "To use the PAUP defaults, hit return. \n";
+	$hsCMDs = <STDIN>;
+	chop ($hsCMDs);
+
+print "Add additional bootstrap options here. \n";
+print "To use the PAUP defaults, hit return. \n";
+  $bootOpts = <STDIN>;
+  chop ($bootOpts);
+
+print "Do you want PAUP to keep a log file for each bootstrap replicate? <Y|n>\n";
+	 $savelog = <STDIN>;
+	 chop($savelog);
+if ($savelog =~ /n/i) {
+	$savelog = "no";
+}
+else {
+	$savelog = "yes";
+}
+
+if ($paupbin && $paupbin_condor) {
+	print "Pick a Condor \"universe\": <standard(S)|vanilla(v)>\n";
+	$condorU = <STDIN>;
+	chop ($condorU);
+}
+if ( $condorU =~ /s/i) {
+	$condorU = "standard";
+}
+else {
+	$condorU = "vanilla";
+}
+if ( $condorU eq "standard" || (!$paupbin && $paupbin_condor)) {
+	$condorU = "standard";
+	$paupBin = $paupbin_condor;
+}
+elsif ($condorU eq "vanilla" || $paupbin && !$paupbin_condor ) {
+   $condorU = "vanilla";
+   $paupBin = $paupbin;
+}
+
+print "Do you want to be notified by email when your job(s) complete? <y|N>\n";
+    $qnotify = <STDIN>;
+    chop($qnotify);
+
+if ($qnotify =~ /y/i) {
+   print "Choose notification level (see man condor_submit for details): \n";
+   print "                    <complete(C)|error(e)|never(n)|always(a)> \n";
+   $notify = <STDIN>;
+   chop($notify);
+       if ($notify =~ /^e/i) {
+           $notify = "error";
+           email();
+       }
+       elsif ($notify =~ /^n/i) {
+              $notify = "never";
+       }
+       elsif ($notify =~ /^a/i) {
+              $notify = "always";
+              email();
+       }
+       else {
+           $notify = "complete";
+           email();
+       }
+}
+   
+sub email { 
+    print "What is your email address? \n";
+    $email = <STDIN>;
+    chop($email);
+}
+         
+#Do some work
+
+mkdir("RepFiles", 0755) || die "Cannot mkdir RepFiles: $!"; 
+chdir "$dir/RepFiles";
+system ("cp $dataFile .");
+
+&cmdFile;
+&nexusFiles;
+&treeFiles;
+&comments;
+
+
+#===  FUNCTION  ================================================================
+#         NAME:  find_paup
+#  DESCRIPTION:  Checks if PAUP can be found.
+#   PARAMETERS:  ????
+#      RETURNS:  path to paup
+#         TODO:
+#===============================================================================
+sub find_paup {
+    my $paup = '';
+    FIND_PAUP:
+    foreach (split(/:/,$ENV{PATH})) {
+        if (-x "$_/paup") {
+            $paup = "$_/paup";
+            last FIND_PAUP;
+        }
+    }
+    return $paup;
+}
+
+#===  FUNCTION  ================================================================
+#         NAME:  find_paupcondor
+#  DESCRIPTION:  Checks if PAUP condor can be found.
+#   PARAMETERS:  ????
+#      RETURNS:  path to paup condor
+#         TODO:
+#===============================================================================
+sub find_paupcondor {
+    my $paup = '';
+    FIND_PAUP:
+    foreach (split(/:/,$ENV{PATH})) {
+        if (-x "$_/condor_paupdev") {
+            $paup = "$_/condor_paup";
+            last FIND_PAUP;
+        }
+    }
+    return $paupbin_condor;
+ }
+
+###############################
+sub expandHome {
+$userInput =~ s{ ^ ~ ( [^/]* ) }
+             { $1
+                   ? (getpwnam($1))[7]
+                   : ( $ENV{HOME} || $ENV{LOGDIR}
+                        || (getpwuid($>))[7]
+                      )
+}ex;
+}
+
+###############################
+# used when a command line arg is not give or the file given by
+# arg does not exist
+sub getDataFile {
+	print "\nEnter your data filename:\n";
+	print "*************************\n";
+	print "You may use \"~\" for your home directory path.\n";
+	print "Otherwise, give the relative or absolute pathname to the data file.\n";
+	print "For example ../mydatafile.nex \n";
+		$userInput = <STDIN>;
+		chop ($userInput);
+		&expandHome;
+	if (-e $userInput){
+		$abs_path = File::Spec->rel2abs($userInput);
+		($volume, $directory, $file) = File::Spec->splitpath($userInput);
+		return $abs_path;
+	}
+	else { 
+		print "\nWARNING: The file $userInput doesn't exist! \n\n";
+		print "Enter the data filename again: \n";
+			$userInput = <STDIN>;
+			chop ($userInput);
+			&expandHome;
+		if (-e $userInput){
+			$abs_path = File::Spec->rel2abs($userInput);
+			($volume, $directory, $file) = File::Spec->splitpath($userInput);
+			return $abs_path;
+		}
+		else {	
+			print "\nERROR: The file $userInput doesn't exist! \n\n";
+			print "RepMaker terminating.\n";
+			exit 1;
+		}
+	}
+}
+
+###############################
+sub cmdFile {
+   
+open(CMD, ">repMaker.cmd")|| die "Can't open repMaker.cmd:  $!\n"; 
+	print CMD "  # paup running in Condor $condorU Universe \n\n";
+	print CMD "  initialdir   = $dir/RepFiles \n";
+	print CMD "  Rank = kflops \n\n";
+	print CMD "  Executable   = $paupBin \n";
+    print CMD "  Universe     = $condorU \n";
+	if ($condorU eq "vanilla") {
+		print CMD << 'CMDL'
+    requirements = (OpSys =="OSX" && Arch =="PPC") || \
+                 (OpSys =="WINNT51" && Arch =="INTEL") || \
+                 (OpSys =="LINUX" && Arch =="INTEL") || \
+                 (OpSys =="LINUX" && Arch =="ALPHA")  || \
+                 (OpSys =="LINUX" && Arch =="X86_64")
+
+CMDL
+  	}
+	else { 
+		print CMD "requirements = OpSys ==\"LINUX\" && Arch ==\"INTEL\"\n";
+    }
+
+if ($condorU eq "vanilla") {
+print CMD  << "CMDL"
+  should_transfer_files = YES
+  when_to_transfer_output = ON_EXIT_OR_EVICT
+  transfer_input_files = $file, rep\.\$\(Process\)
+
+CMDL
+}
+else {
+	print CMD "\n";
+}
+
+if ($qnotify =~ /y/i) {
+print CMD <<"P2";
+  notification = $notify
+  notify_user  = $email
+P2
+}
+else {
+	print CMD "notification = NEVER\n";
+}
+
+print CMD <<'P3';
+  arguments = rep.$(Process) -n -f
+  output    = rep_out.$(Process)
+  error     = rep_error.$(Process)
+  log       = rep.log
+
+P3
+
+print CMD "Queue $nodes \n"; 
+
+close(CMD);
+
+}
+
+###############################
+sub nexusFiles {
+	$dataFile =~ s/$hdir/~/;
+	for($i=0; $i<$nodes; $i++) {
+     $bootBlock =<<"BB";
+
+[PAUP block added by RepMaker]
+begin paup;
+      boot bseed=$seed nreps=$nreps treefile=rep_bstrees.$i $bootOpts /$hsCMDs; 
+BB
+    
+    open(BOOTFILE, ">rep.$i") || die "Can't open rep.$i:  $!\n";
+         print BOOTFILE "#NEXUS \n";
+         print BOOTFILE "[file created by RepMaker] \n\n";
+         print BOOTFILE "begin paup;\n";
+         if ($savelog eq "yes") {
+         	print BOOTFILE "  log start file = rep_log.$i;\n";
+         }
+         if ($condorU eq "vanilla") {
+		 	print BOOTFILE " execute $file;\n";
+		 }
+		 else {
+         	print BOOTFILE "  execute $dataFile;\n";
+         }
+         print BOOTFILE "end;\n\n";
+         
+         print BOOTFILE "$paupCmds \n";
+         
+         print BOOTFILE "$bootBlock";
+         if ($savelog eq "yes") {
+         	print BOOTFILE "  log stop; \n";
+         }
+         print BOOTFILE "end;\n\n";
+    close(BOOTFILE);
+   	
+   	if ($fixSeed =~ /y/i) {
+		$seed++;
+	}
+  }
+}
+
+###############################
+sub openInput {
+	
+	if (-e "$dir/input.nex") {
+		open INPUT, "<$dir/input.nex" || die "Can't open $dir/input.nex:  $!\n"; 
+			undef $/; 
+			$paupCmds = <INPUT>;
+		close INPUT; 
+		$/ = "\n";     #Restore for normal behaviour
+		return $paupCmds;
+	}else {
+		print "WARNING: The directory you are in does not contain a file named \"input.nex.\"\n";
+		print "         The contents of this file are used to change the default settings \n";
+		print "         for each bootstrap replicate. \n\n";
+		print "To ignore this warning and continue, type \"yes\"\n";
+		$continue = <STDIN>;
+   		chop($continue);
+		if ($continue =~ /y/i) {
+			$paupCmds = "[!using defaults]";
+			return $paupCmds;
+		} else {
+			exit(1);
+		}
+	}
+}
+
+###############################
+sub treeFiles {
+
+$tP1 = "#!/usr/bin/perl -w";
+$tP2 = "\$nodes = $nodes;";
+
+$tP3 = <<'TP';
+`cat rep_bstrees.0 > allReps.out`;
+for($i=1; $i<$nodes; $i++) {
+    `cat rep_bstrees.$i >> allReps.out`
+}
+
+system ("paup getTrees.nex 1>&2");
+
+TP
+
+  open(TREEPL, ">getTrees.pl") || die "Can't open getTrees.pl:  $!\n";
+      print TREEPL "$tP1\n";
+      print TREEPL "$tP2\n";
+      print TREEPL "$tP3\n";
+  close(TREEPL);
+  
+`chmod 755 getTrees.pl`;
+  
+  open(TREEFILE, ">getTrees.nex") || die "Can't open getTrees.nex:  $!\n";
+      print TREEFILE "#NEXUS \n";
+      print TREEFILE "[file created by RepMaker] \n\n";
+      print TREEFILE "begin paup;\n";
+      print TREEFILE "  execute $dataFile;\n";
+      print TREEFILE "  set increase=auto;\n";
+      print TREEFILE "  gettrees allblocks=yes StoreTreeWts=yes file=allReps.out mode=3;\n";
+      print TREEFILE "  contree all/strict=no majrule=yes usetreewts=yes treefile = repMakerBS.tre replace;\n";
+      print TREEFILE "end;\n\n";
+      print TREEFILE "quit;\n";
+  close(TREEFILE);
+}
+
+###############################
+sub comments {
+
+print <<'CMTS';
+####################################################
+If your cluster is part of a Condor "flock" do the following:
+
+> cd RepFiles
+> condor_submit repMaker.cmd
+ 
+If the Condor scheduler is not configured on your cluster do the following:
+
+> cd RepFiles
+> ../bslauncher -f ../hosts.in
+
+##NOTE: The hosts.in file must include the names of nodes available in your
+##      cluster. Also, you must be able to access nodes via passwordless ssh 
+##      authentication and your home directory must be mounted on all of the
+##      nodes listed in the hosts.in file.  
+
+After all the reps finish return to the RepFiles directory and execute the perl 
+script named getTrees.pl.
+
+> ./getTrees.pl
+
+The getTrees.pl script will concatenate all of the individual bootstrap tree files and 
+get paup to save the consensus treefile to repMakerBS.tre.  
+
+If you want to transfer things to your Mac or PC so that you can print a pretty picture, 
+move the following files: 
+
+allReps.out
+getTrees.nex
+YourDataFile.nex
+
+The getTrees.nex file will have to be changed to reflect the location of your
+data file on your Mac or PC.  The getTrees.nex file will look something like this:
+
+begin paup;
+  execute ~/anolis/anolis_crist.nex; [<---- !!!! CHANGE THIS LINE !!!!!]
+  gettrees allblocks=yes StoreTreeWts=yes file=allReps.out mode=3;
+  contree all/strict=no majrule=yes usetreewts=yes treefile = repMakerBS.tre;
+end;
+
+Change the execute line as noted.
+
+Enjoy!
+####################################################
+
+CMTS
+}

@@ -1,0 +1,115 @@
+##########################################################################
+# RepMaker Version .9  -- a utility for creating multiple NEXUS files.
+#          Files can be used to distribute a single PAUP* 
+#          bootstrap analysis over multiple machines using:
+#          -- Condor (http://www.cs.wisc.edu/condor) or 
+#          -- BsLauncher (http://www.paup.csit.fsu.edu/nlinks.html) 
+# Copyright (C) 2003 James Wilgenbusch
+# 
+# This program is free software; you can redistribute it and/or
+# modify it under the terms of the GNU General Public License
+# as published by the Free Software Foundation; either version 2
+# of the License, or (at your option) any later version.
+#
+# This program is distributed in the hope that it will be useful,
+# but WITHOUT ANY WARRANTY; without even the implied warranty of
+# MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+# GNU General Public License for more details. 
+# http://www.gnu.org/copyleft/gpl.html 
+##########################################################################
+
+Description:
+============
+RepMaker is a program that automatically generates multiple NEXUS files. 
+These files can be used to distribute a single PAUP* bootstrap analysis over 
+multiple machines using the scheduler Condor or the perl utility BsLauncher
+(included with RepMaker). Repmaker takes advantage of the "embarrassingly 
+parallel" nature of non-parametric phylogenetic bootstrap analyses.  The 
+repmaker script simply creates a bunch of NEXUS files that can be run 
+independently across however many computers you have access to.  After these 
+individual bootstrap replicates have completed a second script is generated that 
+will merge the individual results into a complete bootstrap analysis.
+
+Getting started:
+=============
+
+1. Create a NEXUS command file named "input.nex" in your current working directory.
+The input.nex file contains a paup block with all the paup commands 
+that will be executed for each bootstrap replicate.  The file
+might have a paup block with model parameters and the names of sequences to 
+be deleted.  For example:
+
+begin paup;
+  delete 1;
+  set crit=likelihood;
+  lset nst=2 tratio=4.71 rates=gamma shape=0.4036;
+end;
+
+2. If you use Condor to distribute the individual replicates, then you 
+will need to change the path to the PAUP executable.  To run paup in 
+the condor standard universe the PAUP binary must be linked to the condor library. 
+See the Condor documentation for more on running application in the standard
+universe. 
+
+3. After you run repmaker be sure to look at the condor commad file 
+"repMaker.cmd".  You will most likely need to edit this file for your computing 
+environment.   
+
+Usage: 
+======
+repmaker <filename>
+
+RepMaker takes a single optional argument; the name of a NEXUS data file.  If a 
+filename is not given, then the program will query you for one once it is started.
+Also, the program will be ask you to input the total number of bootstrap replicates 
+to be included in your analysis and how many times you would like to divide up the 
+total number of replicates. 
+
+When the program finishes you will find a directory named RepFiles. The RepFiles 
+directory contains the individual bootstrap replicate files, a condor command file, 
+and a perl script for putting things back together after all replicates finish.
+
+After running RepMaker do the following:
+
+If your cluster is part of a Condor "flock":
+
+> cd RepFiles
+> condor_submit repMaker.cmd
+ 
+If the Condor scheduler is not configured on your cluster:
+
+> cd RepFiles
+> ../bslauncher -f ../hosts.in
+
+##NOTE: The hosts.in file must include the names of nodes available in your
+##      cluster. Also, you must be able to access nodes via passwordless ssh 
+##      authentication and your home directory must be mounted on all of the
+##      nodes listed in the hosts.in file.  
+
+After all the reps finish, return to the RepFiles directory and execute the perl 
+script named getTrees.pl.
+
+> ./getTrees.pl
+
+The getTrees.pl script will concatenate all of the individual bootstrap tree files and 
+get paup to save the consensus treefile to repMakerBS.tre.  
+
+If you want to transfer things to your Mac or PC so that you can print a pretty picture, 
+move the following files: 
+
+allReps.out
+getTrees.nex
+YourDataFile.nex
+
+The getTrees.nex file will have to be changed to reflect the location of your
+data file on your Mac or PC.  The getTrees.nex file will look something like this:
+
+begin paup;
+  execute ~/anolis/anolis_crist.nex; [<---- !!!! CHANGE THIS LINE !!!!!]
+  gettrees allblocks=yes StoreTreeWts=yes file=allReps.out mode=3;
+  contree all/strict=no majrule=yes usetreewts=yes treefile = repMakerBS.tre;
+end;
+
+Change the execute line as noted.
+
+Enjoy!
